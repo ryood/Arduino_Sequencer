@@ -44,9 +44,11 @@ extern uint8_t SmallFont[];
 #define PIN_RE1_B  17
 
 // タクトスイッチ
-#define PIN_SW_RUN  3
+#define PIN_SW_RUN      3
+#define PIN_SW_NOTE_ON  2
 
-Bounce debouncerRun = Bounce();
+Bounce debouncerRun    = Bounce();
+Bounce debouncerNoteOn = Bounce();
 
 // シーケンサーコマンド
 #define CMDM_BASE       (0b00000000)
@@ -144,6 +146,10 @@ void setup() {
   debouncerRun.attach(PIN_SW_RUN);
   debouncerRun.interval(5);
   
+  pinMode(PIN_SW_NOTE_ON, INPUT_PULLUP);
+  debouncerNoteOn.attach(PIN_SW_NOTE_ON);
+  debouncerNoteOn.interval(5);
+  
   // PSOC4_DCO
   pinMode(PSOC4_DCO_CS, OUTPUT);
   
@@ -154,7 +160,9 @@ void setup() {
   // LCD5110
   myGLCD.InitLCD();
   myGLCD.setFont(SmallFont);
-  initLCD();  
+  //initLCD();  
+  isRunning = false;
+  isDirty = true;
 
   // TimerOneの初期化
   samplingRate = 200;
@@ -172,7 +180,7 @@ void loop() {
     if (isRunning) {
       isRunning = false;
       Timer1.detachInterrupt();
-      initLCD();
+      //initLCD();
       isDirty = true;
     } else {
       isRunning = true;
@@ -185,6 +193,20 @@ void loop() {
   }
 
   if (!isRunning) {
+    // NoteOnスイッチ
+    debouncerNoteOn.update();
+    tmp = debouncerNoteOn.read();
+    if (tmp == LOW) {
+      if (sequence[pos].noteOn) {
+        sequence[pos].noteOn = false;
+      } else {
+        sequence[pos].noteOn = true;
+      }
+      do { 
+        debouncerNoteOn.update();
+      } while(debouncerNoteOn.read() == LOW);
+      isDirty = true;
+    }
     // ポジションの読み取り
     tmp = pos;
     pos += readRE(1);
@@ -204,47 +226,57 @@ void loop() {
       updateLCD();
     }
   }
-  
   delay(1);
 }
 
 //-------------------------------------------------
 // LCDの描画
-void initLCD() {
-  int x, y;
-  
-  myGLCD.clrScr();
-  for (x = 0; x <= 16; x++) {
-    myGLCD.drawLine(x * 5, 0, x * 5, 48);
-  }
-  for (y = 0; y <= 14; y++) {
-    myGLCD.drawLine(0, y * 3, 84, y * 3);
-  }
-  myGLCD.update();
-}
-
 void updateLCD() {
   static bool flag;
   int x, y;
+  int x1, x2, y1, y2;
   
   //digitalWrite(PIN_CHECK, flag);
   flag = flag ? false : true;
   
   isDirty = false;
-    myGLCD.clrScr();
+  myGLCD.clrScr();
+  
+  // Pos Indicator Grid
+  myGLCD.drawLine(0, 0, 80, 0); 
+  // Sequence Grid
   for (x = 0; x <= 16; x++) {
     myGLCD.drawLine(x * 5, 0, x * 5, 48);
   }
-  for (y = 0; y <= 14; y++) {
-    myGLCD.drawLine(0, y * 3, 84, y * 3);
+  for (y = 0; y <= 13; y++) {
+    myGLCD.drawLine(0, y * 3 + 3, 80, y * 3 + 3);
   }
-  for (x = 0; x <= 16; x++) {
-    myGLCD.drawRect(x * 5 + 1, sequence[x].pitch * 3 + 1, x * 5 + 4, sequence[x].pitch * 3 + 2);
+  myGLCD.drawLine(0, 47, 80, 47);
+  
+  // Pos Indicator
+  myGLCD.drawLine(pos * 5 + 1, 1, pos * 5 + 5, 1);
+  // Sequence
+  for (x = 0; x <= 15; x++) {
+    myGLCD.drawRect(x * 5 + 1, 41 - (sequence[x].pitch * 3), x * 5 + 4, 41 - (sequence[x].pitch * 3 + 1));
   }
+  // Note & Tie
+  for (x = 0; x <= 15; x++) {
+    if (sequence[x].noteOn) {
+      x1 = x * 5 + 1;
+      y2 = 46;
+      if (sequence[x].tie)    x2 = x * 5 + 4;
+      else                    x2 = x * 5 + 3;
+      if (sequence[x].accent) y1 = 43;
+      else                    y1 = 44;
+      myGLCD.drawRect(x1, y1, x2, y2);
+    }  
+  }
+  /*
   myGLCD.print("              ", 0, 40);
   myGLCD.printNumI(isRunning, 0, 40);
   myGLCD.printNumI(pos, 20, 40);
   myGLCD.printNumI(sequence[pos].pitch, 40, 40);
+*/
   myGLCD.update();
 }
 
