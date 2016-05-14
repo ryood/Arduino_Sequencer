@@ -10,7 +10,9 @@
 #include <LCD5110_Graph.h>
 #include <Bounce2.h>
 
-#define PIN_CHECK  5
+#define SAMPLING_RATE  200  // us
+
+#define PIN_CHECK  0
 
 // SPI
 #define SPI_SCK   13
@@ -18,21 +20,19 @@
 #define SPI_MOSI  11
 
 // PSOC4_DCO
-#define PSOC4_DCO_CS 7
+#define PSOC4_DCO_CS 10
 
-#define CMDM_BASE       (0b00000000)
-#define CMDM_FREQ_DECI  (CMDM_BASE|0x01)
-#define CMDM_PALS_WIDTH (CMDM_BASE|0x02)
-#define CMDM_WAV_FORM   (CMDM_BASE|0x03)
-
-// LCD5110
-#define LCD5110_CS  10
-#define LCD5110_DC   2
-#define LCD5110_RST  3
+// AD8403_DCF
+#define AD8403_DCF_CS  9
 
 // MCP4922
-#define MCP4922_CS    9
-#define MCP4922_LDAC  8
+#define MCP4922_CS    8
+#define MCP4922_LDAC  7
+
+// LCD5110
+#define LCD5110_CS  6
+#define LCD5110_DC   5
+#define LCD5110_RST  4
 
 LCD5110 myGLCD(SPI_SCK, SPI_MOSI, LCD5110_DC, LCD5110_RST, LCD5110_CS);  // SCK, MOSI, DC, RST, CS
 extern uint8_t SmallFont[];
@@ -44,15 +44,21 @@ extern uint8_t SmallFont[];
 #define PIN_RE1_B  17
 
 // タクトスイッチ
-#define PIN_SW_RUN  4
+#define PIN_SW_RUN  3
 
 Bounce debouncerRun = Bounce();
+
+// シーケンサーコマンド
+#define CMDM_BASE       (0b00000000)
+#define CMDM_FREQ_DECI  (CMDM_BASE|0x01)
+#define CMDM_PALS_WIDTH (CMDM_BASE|0x02)
+#define CMDM_WAV_FORM   (CMDM_BASE|0x03)
 
 // 大域変数
 #define SEQUENCE_N  16
 
 struct Sequence {
-  byte pitch;
+  int pitch;
   byte octave;
   bool noteOn;
   bool tie;
@@ -108,31 +114,12 @@ void updateWhileRun() {
   // DACに出力
   outDAC(2048);
  
+  //updateWhileStop();
   // ラッチ?
 }
 
-/*
-void updateWhileStop() {
-  static bool flag;
-  
-  digitalWrite(PIN_CHECK, flag);
-  flag = flag ? false : true;
-  
-  // LCDに表示
-  if (isDirty) {
-    isDirty = false;
-    myGLCD.clrRect(tPrevPos * 5 + 1, 1, tPrevPos * 5 + 4, 2);
-    myGLCD.drawRect(tPos * 5 + 1, 1, tPos * 5 + 4, 2);
-    myGLCD.printNumI(isRunning, 0, 40);
-    myGLCD.printNumI(sequence[tPos].pitch, 20, 40);
-    myGLCD.update();
-  }
-}
-*/
-
 void setup() {
   int i;
-  int x, y;
   int samplingRate;
   
   for (i = 0; i < SEQUENCE_N; i++) {
@@ -166,21 +153,12 @@ void setup() {
   // LCD5110
   myGLCD.InitLCD();
   myGLCD.setFont(SmallFont);
-  //myGLCD.setContrast(64);
-  
-  myGLCD.clrScr();
-  for (x = 0; x <= 16; x++) {
-    myGLCD.drawLine(x * 5, 0, x * 5, 48);
-  }
-  for (y = 0; y <= 14; y++) {
-    myGLCD.drawLine(0, y * 3, 84, y * 3);
-  }
-  myGLCD.update();
-  
-  // Timerの初期化
+  initLCD();  
+
+  // TimerOneの初期化
   samplingRate = 200;
   Timer1.initialize(samplingRate);
-  Timer1.attachInterrupt(updateWhileRun);
+  //Timer1.attachInterrupt(updateWhileRun);
 }
 
 void loop() {
@@ -191,22 +169,72 @@ void loop() {
   debouncerRun.update();
   tmp = debouncerRun.read();
   if (tmp == LOW) {
-    isRunning = isRunning ? false : true;
-    isDirty = true;
-    delay(100);
+    if (isRunning) {
+      isRunning = false;
+      Timer1.detachInterrupt();
+      initLCD();
+      isDirty = true;
+    } else {
+      isRunning = true;
+      displayRunning();
+      Timer1.attachInterrupt(updateWhileRun);
+    }
+    do { 
+      debouncerRun.update();
+    } while(debouncerRun.read() == LOW);
   }
 
   if (!isRunning) {  
     // ピッチの読み取り
     tmp = sequence[tPos].pitch;
     sequence[tPos].pitch += readRE(0);
-    constrain(sequence[tPos].pitch, 0, 12);
+    sequence[tPos].pitch = constrain(sequence[tPos].pitch, 0, 12);
     if (tmp != sequence[tPos].pitch) {
       isDirty = true;
+    }
+    if (isDirty) {
+      updateLCD();
     }
   }
   
   delay(1);
+}
+
+//-------------------------------------------------
+// LCDの描画
+void initLCD() {
+  int x, y;
+  
+  myGLCD.clrScr();
+  for (x = 0; x <= 16; x++) {
+    myGLCD.drawLine(x * 5, 0, x * 5, 48);
+  }
+  for (y = 0; y <= 14; y++) {
+    myGLCD.drawLine(0, y * 3, 84, y * 3);
+  }
+  myGLCD.update();
+}
+
+void updateLCD() {
+  static bool flag;
+  byte tPos, tPrevPos;
+  
+  //digitalWrite(PIN_CHECK, flag);
+  flag = flag ? false : true;
+  
+  isDirty = false;
+  myGLCD.clrRect(tPrevPos * 5 + 1, 1, tPrevPos * 5 + 4, 2);
+  myGLCD.drawRect(tPos * 5 + 1, 1, tPos * 5 + 4, 2);
+  myGLCD.print("              ", 0, 40);
+  myGLCD.printNumI(isRunning, 0, 40);
+  myGLCD.printNumI(sequence[tPos].pitch, 20, 40);
+  myGLCD.update();
+}
+
+void displayRunning() {
+  myGLCD.clrScr();
+  myGLCD.print("Now Playing", 0, 0);
+  myGLCD.update();
 }
 
 //-------------------------------------------------
