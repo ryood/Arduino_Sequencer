@@ -206,7 +206,7 @@ void loop() {
 void outDCO(uint16_t frequency)
 {
   SPI.begin();
-  SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   digitalWrite(PSOC4_DCO_CS, LOW);
   SPI.transfer(CMDM_FREQ_DECI);
   SPI.transfer(frequency >> 8);
@@ -230,7 +230,7 @@ void outDCO(uint16_t frequency)
 void outDAC(int16_t v)
 {
   SPI.begin();
-  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   digitalWrite(MCP4922_LDAC, HIGH) ;
   digitalWrite(MCP4922_CS, LOW) ;
   SPI.transfer((v >> 8)| 0x30) ;
