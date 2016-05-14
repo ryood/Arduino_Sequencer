@@ -66,6 +66,7 @@ struct Sequence {
 } sequence[SEQUENCE_N];
 
 byte bpm = 120;
+int pos = 0;
 bool isRunning = true;
 bool isDirty = false;
 
@@ -162,7 +163,6 @@ void setup() {
 }
 
 void loop() {
-  int tPos, tPrevPos;
   int tmp;
   
   // Run/Stopスイッチ
@@ -184,14 +184,22 @@ void loop() {
     } while(debouncerRun.read() == LOW);
   }
 
-  if (!isRunning) {  
+  if (!isRunning) {
+    // ポジションの読み取り
+    tmp = pos;
+    pos += readRE(1);
+    pos = constrain(pos, 0, SEQUENCE_N - 1);
+    if (tmp != pos) {
+      isDirty = true;
+    } 
     // ピッチの読み取り
-    tmp = sequence[tPos].pitch;
-    sequence[tPos].pitch += readRE(0);
-    sequence[tPos].pitch = constrain(sequence[tPos].pitch, 0, 12);
-    if (tmp != sequence[tPos].pitch) {
+    tmp = sequence[pos].pitch;
+    sequence[pos].pitch += readRE(0);
+    sequence[pos].pitch = constrain(sequence[pos].pitch, 0, 12);
+    if (tmp != sequence[pos].pitch) {
       isDirty = true;
     }
+    
     if (isDirty) {
       updateLCD();
     }
@@ -217,17 +225,26 @@ void initLCD() {
 
 void updateLCD() {
   static bool flag;
-  byte tPos, tPrevPos;
+  int x, y;
   
   //digitalWrite(PIN_CHECK, flag);
   flag = flag ? false : true;
   
   isDirty = false;
-  myGLCD.clrRect(tPrevPos * 5 + 1, 1, tPrevPos * 5 + 4, 2);
-  myGLCD.drawRect(tPos * 5 + 1, 1, tPos * 5 + 4, 2);
+    myGLCD.clrScr();
+  for (x = 0; x <= 16; x++) {
+    myGLCD.drawLine(x * 5, 0, x * 5, 48);
+  }
+  for (y = 0; y <= 14; y++) {
+    myGLCD.drawLine(0, y * 3, 84, y * 3);
+  }
+  for (x = 0; x <= 16; x++) {
+    myGLCD.drawRect(x * 5 + 1, sequence[x].pitch * 3 + 1, x * 5 + 4, sequence[x].pitch * 3 + 2);
+  }
   myGLCD.print("              ", 0, 40);
   myGLCD.printNumI(isRunning, 0, 40);
-  myGLCD.printNumI(sequence[tPos].pitch, 20, 40);
+  myGLCD.printNumI(pos, 20, 40);
+  myGLCD.printNumI(sequence[pos].pitch, 40, 40);
   myGLCD.update();
 }
 
