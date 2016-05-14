@@ -11,7 +11,7 @@
 #include <Bounce2.h>
 #include "scaleTable10.h"
 
-#define SAMPLING_RATE  10000  // us
+#define SAMPLING_RATE  5000  // us
 
 #define PIN_CHECK  0
 
@@ -206,7 +206,7 @@ void loop() {
 void outDCO(uint16_t frequency)
 {
   SPI.begin();
-  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
   digitalWrite(PSOC4_DCO_CS, LOW);
   SPI.transfer(CMDM_FREQ_DECI);
   SPI.transfer(frequency >> 8);
@@ -250,7 +250,7 @@ void updateWhileRun() {
   
   ticks--;
   if (ticks <= 0) {
-    ticks = 625;
+    ticks = 25;
     frequency10 = scaleTable10[sequence[pos].pitch + 48];
     pos++;
     if (pos == SEQUENCE_N) {
