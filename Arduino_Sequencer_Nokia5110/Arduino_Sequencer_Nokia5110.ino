@@ -9,8 +9,9 @@
 #include <TimerOne.h>
 #include <LCD5110_Graph.h>
 #include <Bounce2.h>
+#include "scaleTable10.h"
 
-#define SAMPLING_RATE  200  // us
+#define SAMPLING_RATE  10000  // us
 
 #define PIN_CHECK  0
 
@@ -46,9 +47,11 @@ extern uint8_t SmallFont[];
 // タクトスイッチ
 #define PIN_SW_RUN      3
 #define PIN_SW_NOTE_ON  2
+#define PIN_SW_TIE      1
 
 Bounce debouncerRun    = Bounce();
 Bounce debouncerNoteOn = Bounce();
+Bounce debouncerTie    = Bounce();
 
 // シーケンサーコマンド
 #define CMDM_BASE       (0b00000000)
@@ -74,59 +77,11 @@ bool isDirty = false;
 
 volatile int ticks = 0;
 
-
-// PSoC 4 DCOに出力
-// parameter: frequency: 周波数の10倍値
-void outDCO(uint16_t frequency)
-{
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(PSOC4_DCO_CS, LOW);
-  SPI.transfer(CMDM_FREQ_DECI);
-  SPI.transfer(frequency >> 8);
-  SPI.transfer(frequency & 0xff);
-  digitalWrite(PSOC4_DCO_CS, HIGH);
-  SPI.endTransaction();
-  SPI.end();
-}
-
-// DACに出力
-// parameter: v: 出力値(0 .. 4095)
-void outDAC(int16_t v)
-{
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(MCP4922_LDAC, HIGH) ;
-  digitalWrite(MCP4922_CS, LOW) ;
-  SPI.transfer((v >> 8)| 0x30) ;
-  SPI.transfer(v & 0xff) ;
-  digitalWrite(MCP4922_CS, HIGH) ;
-  digitalWrite(MCP4922_LDAC, LOW) ;
-  SPI.endTransaction();
-  SPI.end();
-}
-
-void updateWhileRun() {
-  static bool flag;
-  
-  digitalWrite(PIN_CHECK, flag);
-  flag = flag ? false : true;
-
-  // PSoC DCOにSPI出力
-  outDCO(10000);  
-  // DACに出力
-  outDAC(2048);
- 
-  //updateWhileStop();
-  // ラッチ?
-}
-
 void setup() {
   int i;
-  int samplingRate;
   
   for (i = 0; i < SEQUENCE_N; i++) {
-    sequence[i].pitch = 12;
+    sequence[i].pitch = i;
     sequence[i].octave = 1;
     sequence[i].noteOn = false;
     sequence[i].tie = false;
@@ -150,6 +105,10 @@ void setup() {
   debouncerNoteOn.attach(PIN_SW_NOTE_ON);
   debouncerNoteOn.interval(5);
   
+  pinMode(PIN_SW_TIE, INPUT_PULLUP);
+  debouncerTie.attach(PIN_SW_TIE);
+  debouncerTie.interval(5);
+  
   // PSOC4_DCO
   pinMode(PSOC4_DCO_CS, OUTPUT);
   
@@ -165,8 +124,7 @@ void setup() {
   isDirty = true;
 
   // TimerOneの初期化
-  samplingRate = 200;
-  Timer1.initialize(samplingRate);
+  Timer1.initialize(SAMPLING_RATE);
   //Timer1.attachInterrupt(updateWhileRun);
 }
 
@@ -207,6 +165,20 @@ void loop() {
       } while(debouncerNoteOn.read() == LOW);
       isDirty = true;
     }
+    // Tieスイッチ
+    debouncerTie.update();
+    tmp = debouncerTie.read();
+    if (tmp == LOW) {
+      if (sequence[pos].tie) {
+        sequence[pos].tie = false;
+      } else {
+        sequence[pos].tie = true;
+      }
+      do { 
+        debouncerTie.update();
+      } while(debouncerTie.read() == LOW);
+      isDirty = true;
+    }
     // ポジションの読み取り
     tmp = pos;
     pos += readRE(1);
@@ -226,7 +198,73 @@ void loop() {
       updateLCD();
     }
   }
-  delay(1);
+  delay(10);
+}
+
+// PSoC 4 DCOに出力
+// parameter: frequency: 周波数の10倍値
+void outDCO(uint16_t frequency)
+{
+  SPI.begin();
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(PSOC4_DCO_CS, LOW);
+  SPI.transfer(CMDM_FREQ_DECI);
+  SPI.transfer(frequency >> 8);
+  SPI.transfer(frequency & 0xff);
+  digitalWrite(PSOC4_DCO_CS, HIGH);
+  SPI.endTransaction();
+  SPI.end();
+/*
+  myGLCD.clrScr();
+  myGLCD.printNumI(pos, 0, 0);
+  myGLCD.printNumI(frequency, 0, 10);
+  myGLCD.printNumI(CMDM_FREQ_DECI, 0, 20);
+  myGLCD.printNumI(frequency >> 8, 0, 30);
+  myGLCD.printNumI(frequency & 0xff, 0, 40);
+  myGLCD.update();
+  */
+}
+
+// DACに出力
+// parameter: v: 出力値(0 .. 4095)
+void outDAC(int16_t v)
+{
+  SPI.begin();
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(MCP4922_LDAC, HIGH) ;
+  digitalWrite(MCP4922_CS, LOW) ;
+  SPI.transfer((v >> 8)| 0x30) ;
+  SPI.transfer(v & 0xff) ;
+  digitalWrite(MCP4922_CS, HIGH) ;
+  digitalWrite(MCP4922_LDAC, LOW) ;
+  SPI.endTransaction();
+  SPI.end();
+}
+
+void updateWhileRun() {
+  static bool flag;
+  static uint16_t frequency10;
+  
+  digitalWrite(PIN_CHECK, flag);
+  flag = flag ? false : true;
+  
+  ticks--;
+  if (ticks <= 0) {
+    ticks = 625;
+    frequency10 = scaleTable10[sequence[pos].pitch + 48];
+    pos++;
+    if (pos == SEQUENCE_N) {
+      pos = 0;
+    }
+  }
+  
+  // PSoC DCOにSPI出力
+  outDCO(frequency10);  
+  // DACに出力
+  outDAC(2048);
+ 
+  //updateWhileStop();
+  // ラッチ?
 }
 
 //-------------------------------------------------
@@ -267,22 +305,17 @@ void updateLCD() {
       if (sequence[x].tie)    x2 = x * 5 + 4;
       else                    x2 = x * 5 + 3;
       if (sequence[x].accent) y1 = 43;
-      else                    y1 = 44;
+      else                    y1 = 43;
       myGLCD.drawRect(x1, y1, x2, y2);
     }  
   }
-  /*
-  myGLCD.print("              ", 0, 40);
-  myGLCD.printNumI(isRunning, 0, 40);
-  myGLCD.printNumI(pos, 20, 40);
-  myGLCD.printNumI(sequence[pos].pitch, 40, 40);
-*/
   myGLCD.update();
 }
 
 void displayRunning() {
   myGLCD.clrScr();
-  myGLCD.print("Now Playing", 0, 0);
+  myGLCD.print(" PLAYING ", 15, 21);
+  //myGLCD.clrLine(15, 20, 69, 20);
   myGLCD.update();
 }
 
