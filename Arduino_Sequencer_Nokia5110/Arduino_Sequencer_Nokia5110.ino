@@ -152,6 +152,7 @@ void loop() {
 
   if (!isRunning) {
     // NoteOnスイッチ
+    /*
     debouncerNoteOn.update();
     tmp = debouncerNoteOn.read();
     if (tmp == LOW) {
@@ -179,6 +180,15 @@ void loop() {
       } while(debouncerTie.read() == LOW);
       isDirty = true;
     }
+    */    
+    // NoteOnスイッチ
+    if (toggleSW(debouncerNoteOn, sequence[pos].noteOn)) {
+      isDirty = true;
+    }
+    // Tieスイッチ
+    if (toggleSW(debouncerTie, sequence[pos].tie)) {
+      isDirty = true;
+    }   
     // ポジションの読み取り
     tmp = pos;
     pos += readRE(1);
@@ -201,46 +211,6 @@ void loop() {
   delay(10);
 }
 
-// PSoC 4 DCOに出力
-// parameter: frequency: 周波数の10倍値
-void outDCO(uint16_t frequency)
-{
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(PSOC4_DCO_CS, LOW);
-  SPI.transfer(CMDM_FREQ_DECI);
-  SPI.transfer(frequency >> 8);
-  SPI.transfer(frequency & 0xff);
-  digitalWrite(PSOC4_DCO_CS, HIGH);
-  SPI.endTransaction();
-  SPI.end();
-/*
-  myGLCD.clrScr();
-  myGLCD.printNumI(pos, 0, 0);
-  myGLCD.printNumI(frequency, 0, 10);
-  myGLCD.printNumI(CMDM_FREQ_DECI, 0, 20);
-  myGLCD.printNumI(frequency >> 8, 0, 30);
-  myGLCD.printNumI(frequency & 0xff, 0, 40);
-  myGLCD.update();
-  */
-}
-
-// DACに出力
-// parameter: v: 出力値(0 .. 4095)
-void outDAC(int16_t v)
-{
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(MCP4922_LDAC, HIGH) ;
-  digitalWrite(MCP4922_CS, LOW) ;
-  SPI.transfer((v >> 8)| 0x30) ;
-  SPI.transfer(v & 0xff) ;
-  digitalWrite(MCP4922_CS, HIGH) ;
-  digitalWrite(MCP4922_LDAC, LOW) ;
-  SPI.endTransaction();
-  SPI.end();
-}
-
 void updateWhileRun() {
   static bool flag;
   static uint16_t frequency10;
@@ -258,13 +228,65 @@ void updateWhileRun() {
     }
   }
   
+  SPI.begin();
   // PSoC DCOにSPI出力
-  outDCO(frequency10);  
-  // DACに出力
+  outDCO(frequency10);
+  // AD8403 DCFにSPI出力  
+  outDCF(128, 128);
+  // DACにSPI出力
   outDAC(2048);
- 
-  //updateWhileStop();
+  SPI.end();
+
   // ラッチ?
+}
+
+// PSoC 4 DCOに出力
+// parameter: frequency: 周波数の10倍値
+void outDCO(uint16_t frequency) {
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(PSOC4_DCO_CS, LOW);
+  SPI.transfer(CMDM_FREQ_DECI);
+  SPI.transfer(frequency >> 8);
+  SPI.transfer(frequency & 0xff);
+  digitalWrite(PSOC4_DCO_CS, HIGH);
+  SPI.endTransaction();
+/*
+  SPI.end();
+  myGLCD.clrScr();
+  myGLCD.printNumI(pos, 0, 0);
+  myGLCD.printNumI(frequency, 0, 10);
+  myGLCD.printNumI(CMDM_FREQ_DECI, 0, 20);
+  myGLCD.printNumI(frequency >> 8, 0, 30);
+  myGLCD.printNumI(frequency & 0xff, 0, 40);
+  myGLCD.update();
+  SPI.begin();
+  */
+}
+
+void outDCF(byte cutOff, byte q) {
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(AD8403_DCF_CS, LOW);
+  SPI.transfer(0);
+  SPI.transfer(q);
+  SPI.transfer(1);
+  SPI.transfer(cutOff);
+  SPI.transfer(3);
+  SPI.transfer(cutOff);
+  digitalWrite(AD8403_DCF_CS, HIGH);
+  SPI.endTransaction();
+}
+
+// DACに出力
+// parameter: v: 出力値(0 .. 4095)
+void outDAC(int16_t v) {
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(MCP4922_LDAC, HIGH) ;
+  digitalWrite(MCP4922_CS, LOW) ;
+  SPI.transfer((v >> 8)| 0x30) ;
+  SPI.transfer(v & 0xff) ;
+  digitalWrite(MCP4922_CS, HIGH) ;
+  digitalWrite(MCP4922_LDAC, LOW) ;
+  SPI.endTransaction();
 }
 
 //-------------------------------------------------
@@ -355,4 +377,25 @@ int readRE(int re_n)
     break;
   }
   return retval;
+}
+
+//-------------------------------------------------
+// スイッチのトグル動作
+// return: true 変化あり false:変化なし
+//
+// Todo: Bounce::fell()が使えないか？
+//
+bool toggleSW(Bounce& debouncer, bool& flag) {
+  bool tmp;
+  
+  debouncer.update();
+  tmp = debouncer.read();
+  if (tmp == LOW) {
+    flag = flag ? false : true;
+    do { 
+      debouncer.update();
+    } while(debouncer.read() == LOW);
+    return true;
+  }
+  return false;
 }
