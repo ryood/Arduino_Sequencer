@@ -65,6 +65,7 @@ Bounce debouncerTie    = Bounce();
 struct Sequence {
   int pitch;
   byte octave;
+  uint16_t frequency10;
   bool noteOn;
   bool tie;
   bool accent;  
@@ -77,12 +78,18 @@ bool isDirty = false;
 
 volatile int ticks = 0;
 
+uint16_t calcFrequency10(struct Sequence& seq) {
+  return scaleTable10[seq.pitch + seq.octave * 12 + 24];
+}
+
 void setup() {
   int i;
   
   for (i = 0; i < SEQUENCE_N; i++) {
     sequence[i].pitch = i;
     sequence[i].octave = 1;
+    //sequence[i].frequency10 = scaleTable10[sequence[i].pitch + sequence[i].octave * 12 + 24];
+    sequence[i].frequency10 = calcFrequency10(sequence[i]);
     sequence[i].noteOn = false;
     sequence[i].tie = false;
     sequence[i].accent = false;
@@ -201,6 +208,7 @@ void loop() {
     sequence[pos].pitch += readRE(0);
     sequence[pos].pitch = constrain(sequence[pos].pitch, 0, 12);
     if (tmp != sequence[pos].pitch) {
+      sequence[pos].frequency10 = calcFrequency10(sequence[pos]);
       isDirty = true;
     }
     
@@ -217,11 +225,10 @@ void updateWhileRun() {
   
   digitalWrite(PIN_CHECK, flag);
   flag = flag ? false : true;
-  
-  ticks--;
+ 
+   ticks--;
   if (ticks <= 0) {
     ticks = 25;
-    frequency10 = scaleTable10[sequence[pos].pitch + 48];
     pos++;
     if (pos == SEQUENCE_N) {
       pos = 0;
@@ -230,7 +237,7 @@ void updateWhileRun() {
   
   SPI.begin();
   // PSoC DCOにSPI出力
-  outDCO(frequency10);
+  outDCO(sequence[pos].frequency10);
   // AD8403 DCFにSPI出力  
   outDCF(128, 128);
   // DACにSPI出力
@@ -238,6 +245,8 @@ void updateWhileRun() {
   SPI.end();
 
   // ラッチ?
+  
+
 }
 
 // PSoC 4 DCOに出力
