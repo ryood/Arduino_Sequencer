@@ -13,7 +13,7 @@
 #include "scaleTable10.h"
 
 #define SAMPLING_RATE  5000  // us
-#define BPM_INIT  30
+#define BPM_INIT  120
 
 #define PIN_CHECK  0
 
@@ -83,6 +83,7 @@ bool isDirty = false;
 
 volatile int ticks = 0;
 
+/*
 void dump() {
   struct Sequence *seq;
   char buff[200];
@@ -95,7 +96,8 @@ void dump() {
     Serial.println(buff);
   }
 }  
-    
+*/
+
 uint16_t calcFrequency10(struct Sequence& seq) {
   return scaleTable10[seq.pitch + seq.octave * 12 + 24];
 }
@@ -103,7 +105,7 @@ uint16_t calcFrequency10(struct Sequence& seq) {
 void setup() {
   int i;
   
-  Serial.begin(9600);
+  //Serial.begin(9600);
   
   for (i = 0; i < SEQUENCE_N; i++) {
     sequence[i].pitch = i;
@@ -202,14 +204,14 @@ void loop() {
     if (tmp != sequence[pos].pitch) {
       sequence[pos].frequency32 = (uint32_t)calcFrequency10(sequence[pos]) << 16;
       isDirty = true;
-      dump();
+      //dump();
     }
     // LCDの更新
     if (isDirty) {
       updateLCD();
     }
   }
-  delay(10);
+  //delay(10);
 }
 
 void prepareToRun() {
@@ -246,11 +248,11 @@ void updateWhileRun() {
       pos = 0;
     }
   }
-
+  /*
   Serial.println("next pos\tfreq\tf_delta");
   sprintf(buff, "%d\t%lu\t%ld", pos, freq, f_delta);
   Serial.println(buff);
-  
+  */
   SPI.begin();
   // PSoC DCOにSPI出力
   outDCO((uint16_t)(freq >> 16));
