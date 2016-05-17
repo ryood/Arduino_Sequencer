@@ -7,7 +7,7 @@
 #ifndef _SCALETABLE10_H_
 #define _SCALETABLE10_H_
 
-const int32_t scaleTable10[] = {
+const uint16_t scaleTable10[] = {
 	82,
 	87,
 	92,
@@ -124,6 +124,7 @@ const int32_t scaleTable10[] = {
 	55877,
 	59199,
 	62719,
+/*
 	66449,
 	70400,
 	74586,
@@ -136,6 +137,7 @@ const int32_t scaleTable10[] = {
 	111753,
 	118398,
 	125439,
+*/
 };
 
 #endif //_SCALETABLE10_H_

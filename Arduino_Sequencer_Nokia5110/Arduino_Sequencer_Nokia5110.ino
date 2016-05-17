@@ -13,6 +13,7 @@
 #include "scaleTable10.h"
 
 #define SAMPLING_RATE  5000  // us
+#define BPM_INIT  30
 
 #define PIN_CHECK  0
 
@@ -48,7 +49,7 @@ extern uint8_t SmallFont[];
 // タクトスイッチ
 #define PIN_SW_RUN      3
 #define PIN_SW_NOTE_ON  2
-#define PIN_SW_TIE      1
+#define PIN_SW_TIE      9  //デバッグ用
 
 Bounce debouncerRun    = Bounce();
 Bounce debouncerNoteOn = Bounce();
@@ -74,7 +75,7 @@ struct Sequence {
   bool accent;  
 } sequence[SEQUENCE_N];
 
-byte bpm = 60;
+byte bpm = BPM_INIT;
 uint16_t noteLen;
 int pos = 0;
 bool isRunning = true;
@@ -82,12 +83,27 @@ bool isDirty = false;
 
 volatile int ticks = 0;
 
+void dump() {
+  struct Sequence *seq;
+  char buff[200];
+  int i;
+  Serial.println("i\tpitch\toctave\tfrequency32\tnoteOn\ttie\ttieDelta\taccent");
+  for (i = 0; i < SEQUENCE_N; i++) {
+    seq = &sequence[i];
+    sprintf(buff, "%d\t%d\t%d\t%lu\t%d\t%d\t%ld\t%d",
+      i, seq->pitch, seq->octave, seq->frequency32, seq->noteOn, seq->tie, seq->tieDelta, seq->accent);
+    Serial.println(buff);
+  }
+}  
+    
 uint16_t calcFrequency10(struct Sequence& seq) {
   return scaleTable10[seq.pitch + seq.octave * 12 + 24];
 }
 
 void setup() {
   int i;
+  
+  Serial.begin(9600);
   
   for (i = 0; i < SEQUENCE_N; i++) {
     sequence[i].pitch = i;
@@ -165,36 +181,6 @@ void loop() {
 
   if (!isRunning) {
     // NoteOnスイッチ
-    /*
-    debouncerNoteOn.update();
-    tmp = debouncerNoteOn.read();
-    if (tmp == LOW) {
-      if (sequence[pos].noteOn) {
-        sequence[pos].noteOn = false;
-      } else {
-        sequence[pos].noteOn = true;
-      }
-      do { 
-        debouncerNoteOn.update();
-      } while(debouncerNoteOn.read() == LOW);
-      isDirty = true;
-    }
-    // Tieスイッチ
-    debouncerTie.update();
-    tmp = debouncerTie.read();
-    if (tmp == LOW) {
-      if (sequence[pos].tie) {
-        sequence[pos].tie = false;
-      } else {
-        sequence[pos].tie = true;
-      }
-      do { 
-        debouncerTie.update();
-      } while(debouncerTie.read() == LOW);
-      isDirty = true;
-    }
-    */    
-    // NoteOnスイッチ
     if (toggleSW(debouncerNoteOn, sequence[pos].noteOn)) {
       isDirty = true;
     }
@@ -214,10 +200,11 @@ void loop() {
     sequence[pos].pitch += readRE(0);
     sequence[pos].pitch = constrain(sequence[pos].pitch, 0, 12);
     if (tmp != sequence[pos].pitch) {
-      sequence[pos].frequency32 = (uint32_t)calcFrequency10(sequence[pos]) << 32;
+      sequence[pos].frequency32 = (uint32_t)calcFrequency10(sequence[pos]) << 16;
       isDirty = true;
+      dump();
     }
-    
+    // LCDの更新
     if (isDirty) {
       updateLCD();
     }
@@ -231,7 +218,7 @@ void prepareToRun() {
   noteLen = 15000 / ((long)bpm * SAMPLING_RATE / 1000);
   for (i = 0; i < SEQUENCE_N - 1; i++) {
     if (sequence[i].tie) {
-      sequence[i].tieDelta = (sequence[i + 1].frequency32 - sequence[i].frequency32) / noteLen;
+      sequence[i].tieDelta = ((int64_t)sequence[i + 1].frequency32 - sequence[i].frequency32) / noteLen;
     } else {
       sequence[i].tieDelta = 0;
     }
@@ -242,6 +229,8 @@ void updateWhileRun() {
   static bool flag;
   static uint32_t freq;
   static int32_t f_delta;
+  static struct Sequence *seq;
+  char buff[200];
   
   digitalWrite(PIN_CHECK, flag);
   flag = flag ? false : true;
@@ -249,6 +238,7 @@ void updateWhileRun() {
   ticks--;
   if (ticks <= 0) {
     ticks = noteLen;
+    seq = &sequence[pos];
     freq    = sequence[pos].frequency32;
     f_delta = sequence[pos].tieDelta;
     pos++;
@@ -256,6 +246,10 @@ void updateWhileRun() {
       pos = 0;
     }
   }
+
+  Serial.println("next pos\tfreq\tf_delta");
+  sprintf(buff, "%d\t%lu\t%ld", pos, freq, f_delta);
+  Serial.println(buff);
   
   SPI.begin();
   // PSoC DCOにSPI出力
@@ -266,10 +260,13 @@ void updateWhileRun() {
   // DACにSPI出力
   outDAC(2048);
   SPI.end();
-/*
+  
+  /*
   myGLCD.clrScr();
-  myGLCD.printNumI(freq, 0, 0);
+  myGLCD.printNumI(freq >> 16, 0, 0);
   myGLCD.printNumI(f_delta, 0, 10);
+  myGLCD.printNumI(seq->pitch, 0, 20);
+  myGLCD.printNumI(seq->octave, 0, 30);
   myGLCD.update();
   */
   // ラッチ?
@@ -285,7 +282,7 @@ void outDCO(uint16_t frequency) {
   SPI.transfer(frequency & 0xff);
   digitalWrite(PSOC4_DCO_CS, HIGH);
   SPI.endTransaction();
-
+/*
   SPI.end();
   myGLCD.clrScr();
   myGLCD.printNumI(pos, 0, 0);
@@ -295,7 +292,7 @@ void outDCO(uint16_t frequency) {
   myGLCD.printNumI(frequency & 0xff, 0, 40);
   myGLCD.update();
   SPI.begin();
-
+*/
 }
 
 void outDCF(byte cutOff, byte q) {
