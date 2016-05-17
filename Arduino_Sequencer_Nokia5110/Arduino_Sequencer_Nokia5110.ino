@@ -68,10 +68,12 @@ struct Sequence {
   uint16_t frequency10;
   bool noteOn;
   bool tie;
+  int tieDelta;
   bool accent;  
 } sequence[SEQUENCE_N];
 
-byte bpm = 120;
+byte bpm = 60;
+uint16_t noteLen;
 int pos = 0;
 bool isRunning = true;
 bool isDirty = false;
@@ -91,7 +93,8 @@ void setup() {
     //sequence[i].frequency10 = scaleTable10[sequence[i].pitch + sequence[i].octave * 12 + 24];
     sequence[i].frequency10 = calcFrequency10(sequence[i]);
     sequence[i].noteOn = false;
-    sequence[i].tie = false;
+    sequence[i].tie = true;
+    sequence[i].tieDelta = 0;
     sequence[i].accent = false;
   }
 
@@ -148,6 +151,7 @@ void loop() {
       //initLCD();
       isDirty = true;
     } else {
+      prepareToRun();
       isRunning = true;
       displayRunning();
       Timer1.attachInterrupt(updateWhileRun);
@@ -219,16 +223,31 @@ void loop() {
   delay(10);
 }
 
+void prepareToRun() {
+  int i;
+  
+  noteLen = 15000 / ((long)bpm * SAMPLING_RATE / 1000);
+  for (i = 0; i < SEQUENCE_N - 1; i++) {
+    if (sequence[i].tie) {
+      sequence[i].tieDelta = (sequence[i + 1].frequency10 - sequence[i].frequency10) / noteLen;
+    } else {
+      sequence[i].tieDelta = 0;
+    }
+  }
+}
+
 void updateWhileRun() {
   static bool flag;
-  static uint16_t frequency10;
+  static uint16_t freq, f_delta;
   
   digitalWrite(PIN_CHECK, flag);
   flag = flag ? false : true;
  
-   ticks--;
+  ticks--;
   if (ticks <= 0) {
-    ticks = 25;
+    ticks = noteLen;
+    freq    = sequence[pos].frequency10;
+    f_delta = sequence[pos].tieDelta;
     pos++;
     if (pos == SEQUENCE_N) {
       pos = 0;
@@ -237,16 +256,19 @@ void updateWhileRun() {
   
   SPI.begin();
   // PSoC DCOにSPI出力
-  outDCO(sequence[pos].frequency10);
+  outDCO(freq);
+  freq += f_delta;
   // AD8403 DCFにSPI出力  
   outDCF(128, 128);
   // DACにSPI出力
   outDAC(2048);
   SPI.end();
 
+  myGLCD.clrScr();
+  myGLCD.printNumI(freq, 0, 0);
+  myGLCD.printNumI(f_delta, 0, 10);
+  myGLCD.update();
   // ラッチ?
-  
-
 }
 
 // PSoC 4 DCOに出力
